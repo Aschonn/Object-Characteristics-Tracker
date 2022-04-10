@@ -25,6 +25,5 @@ flask run
 `
 
 # Output
-Screenshot:
 <img src="https://raw.githubusercontent.com/Aschonn/Object-Characteristics-Tracker/main/output.png">
 
