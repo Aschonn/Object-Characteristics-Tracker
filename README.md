@@ -27,4 +27,4 @@ flask run
 # Output
 Screenshot:
 
-https://github.com/Aschonn/Object-Characteristics-Tracker/blob/main/output.png
+https://raw.githubusercontent.com/Aschonn/Object-Characteristics-Tracker/main/output.png
