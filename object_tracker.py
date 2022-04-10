@@ -7,7 +7,6 @@ import core.utils as utils
 from core.yolov4 import filter_boxes
 from tensorflow.python.saved_model import tag_constants
 from core.config import cfg
-from PIL import Image
 import cv2
 import numpy as np
 import pandas as pd
@@ -41,13 +40,16 @@ except:
     camera = cv2.VideoCapture(0)
 
 
-# Determines if either model is used
+# Toggler (0-1) 
 
 detection = 0
 race = 0
 gender = 0
 age = 0
 emotion = 0
+
+# model and weights settings
+
 video = 0
 max_cosine_distance = 0.4
 nn_budget = None
@@ -67,7 +69,6 @@ tracker = Tracker(metric)
 
 saved_model_loaded = tf.saved_model.load(weights, tags=[tag_constants.SERVING])
 infer = saved_model_loaded.signatures['serving_default']
-
 
 
 # Initalizing Models
@@ -92,16 +93,16 @@ print("finished Race Model")
 # Calculates predictions for facial characteristics  
 
 
-def facial_attr(frame, gender, age, emotion, race, dim, x, y):
+def facial_attr(face_224, gray_img, id, gender, age, emotion, race):
 
-    # specific settings for tailored for a specific model
-
-    face_224 = functions.preprocess_face(img = frame, target_size = (224, 224), grayscale = False, enforce_detection = False, detector_backend = 'opencv')
-    gray_img = functions.preprocess_face(img = frame, target_size = (48, 48), grayscale = True, enforce_detection = False, detector_backend = 'opencv')
 
     # Stores Results
 
     results =  {}
+
+    # ---------------ADDS ID-----------------------
+
+    results['id'] = id
 
     # ------------EMOTION PREDICTION--------------
 
@@ -123,7 +124,7 @@ def facial_attr(frame, gender, age, emotion, race, dim, x, y):
         emotion_df = pd.DataFrame(mood_items, columns = ["emotion", "score"])
         emotion_df = emotion_df.sort_values(by = ["score"], ascending=False).reset_index(drop=True)
         top_emotion = emotion_df['emotion'][0]
-        results['emotion'] = top_emotion
+        results['emo'] = top_emotion
 
 
     #------------AGE PREDICTION-------------------                
@@ -133,7 +134,7 @@ def facial_attr(frame, gender, age, emotion, race, dim, x, y):
         print('it got here')
         age_predictions = age_model.predict(face_224)[0,:]
         apparent_age = Age.findApparentAge(age_predictions)
-        results['age'] = apparent_age
+        results['age'] = str(round(apparent_age))
 
 
     #---------GENDER PREDICTION----------------------
@@ -162,22 +163,8 @@ def facial_attr(frame, gender, age, emotion, race, dim, x, y):
 
     #-------------Outputs Results-------------------------------
 
-    if results:
+    return results
 
-        y_index_counter = 20
-        for key in results.keys():
-            
-            if key != "age":
-                cv2.putText(frame, '{0}: {1}'.format(key.capitalize(),  results[key]), (x, y - y_index_counter), 0, 0.75, (255,255,255), 2)
-            else:
-                cv2.putText(frame, '{0}: {1:.2f}'.format(key.capitalize(),  results[key]), (x, y - y_index_counter), 0, 0.75, (255,255,255), 2)
-            
-            y_index_counter += 10
-
-    
-    #Return Frame
-
-    return frame
 
 
 
@@ -187,7 +174,7 @@ def facial_attr(frame, gender, age, emotion, race, dim, x, y):
 
 def gen():
 
-    #gloval attributes needed 
+    #global attributes needed for toggle
 
     global race, gender, age, emotion
 
@@ -196,7 +183,6 @@ def gen():
     size = 416
     iou = 0.45
     score = 0.50
-    detector_backend = 'opencv'
     nms_max_overlap = 1.0
     frame_num = 0
 
@@ -288,7 +274,6 @@ def gen():
                 else:
                     names.append(class_name)
             names = np.array(names)
-            count = len(names)
 
             # delete detections that are not in allowed_classes
             
@@ -319,7 +304,7 @@ def gen():
             tracker.update(detections)
 
             # update tracks
-
+            
             for track in tracker.tracks:
                 
                 if not track.is_confirmed() or track.time_since_update > 1:
@@ -333,17 +318,16 @@ def gen():
                 color = colors[int(track.track_id) % len(colors)]
                 color = [i * 255 for i in color]
 
-                
-                cv2.rectangle(frame, (int(bbox[0]), int(bbox[1])), (int(bbox[2]), int(bbox[3])), color, 2)
-                cv2.rectangle(frame, (int(bbox[0]), int(bbox[1]-30)), (int(bbox[0])+(len(class_name)+len(str(track.track_id)))*17, int(bbox[1])), color, -1)
-                cv2.putText(frame, class_name + "-" + str(track.track_id),(int(bbox[0]), int(bbox[1]-10)),0, 0.75, (255,255,255),2)
-
-            # Facial Features Prediction and Detection
-
                 try:
-                    faces_in_frame = FaceDetector.detect_faces(face_detector, detector_backend, frame, align = True)
+                    faces_in_frame = FaceDetector.detect_faces(face_detector, "opencv", frame, align = True)
                 except:
                     faces_in_frame = []
+
+                # specific settings for tailored for a specific model
+
+                face_224 = functions.preprocess_face(img = frame, target_size = (224, 224), grayscale = False, enforce_detection = False, detector_backend = 'opencv')
+                gray_img = functions.preprocess_face(img = frame, target_size = (48, 48), grayscale = True, enforce_detection = False, detector_backend = 'opencv')
+
 
                 for face, dim in faces_in_frame:
 
@@ -356,22 +340,37 @@ def gen():
 
                     cv2.rectangle(frame, (x,y), (x+w,y+h), color, 1)
 
-                    gender = gender
-                    age = age
-                    emotion = emotion
-                    race = race
 
-                    # Facial Prediction Function
+                # Facial Features Prediction and Detection
 
-                    frame = facial_attr(frame, gender, age, emotion, race, dim, int(bbox[0]), int(bbox[1]))
 
+                results = facial_attr(face_224, gray_img, str(track.track_id), gender, age, emotion, race)
+
+                print(results)
+                
+                # draws box and insert facial characteristics 
+                min_x = int(bbox[0])
+                min_y = int(bbox[1])
+                max_x = int(bbox[2])
+                max_y = int(bbox[3])
+
+
+                cv2.rectangle(frame, (min_x, min_y), (max_x, max_y), color, 2) #box outline
+                cv2.rectangle(frame, (min_x, min_y-30), (max_x, min_y), color, -1) 
+
+                x_index = 0
+
+                for key, value in results.items():
+                    
+                    cv2.putText(frame, "{0}:{1}".format(key[:2].capitalize(), value[0:3]) ,(int(bbox[0] + x_index), int(bbox[1]-10)),0, 0.75, (255,255,255),2)
+    
+                    x_index +=((max_x - min_x)/len(results))
+        
 
             # Calculate frames per second of running detections
 
             fps = 1.0 / (time.time() - start_time)
             print("FPS: %.2f" % fps)
-            result = np.asarray(frame)
-            result = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
             
             # output video frame
 
